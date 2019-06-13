@@ -7,7 +7,7 @@ module sdc_gmres
 
 	integer 			:: nfilter
 	integer, parameter 	:: dimm = colnodes*6		
-	double precision	:: Ekin0
+	double precision	:: Etot0
 	
 	double precision, dimension(colnodes)			:: delta_tau, q
 	double precision, dimension(colnodes,colnodes)	:: Qd_E, Qd_E2, Qd_T, Smat
@@ -158,7 +158,7 @@ module sdc_gmres
 		end if
 		
 		write(*,"(A, e13.6)") "dt =", dt		
-		Ekin0 = getEnergy(x0,v0)
+		Etot0 = getEnergy(x0,v0)
 		call getMatrices(dt)
 
 		outsteps = steps/nfilter
@@ -195,7 +195,7 @@ module sdc_gmres
 				jnum = k/nfilter
 				pos(:,jnum + 1) = tmp_pos(:,2)
 				vel(:,jnum + 1) = tmp_vel(:,2)
-				energy(jnum) = abs(Ekin0 - getEnergy(pos(:,jnum + 1),vel(:,jnum + 1)))/Ekin0
+				energy(jnum) = abs(Etot0 - getEnergy(pos(:,jnum + 1),vel(:,jnum + 1)))/Etot0
 			end if
 			
 			tmp_pos(:,1) = tmp_pos(:,2)  
@@ -294,16 +294,16 @@ module sdc_gmres
 	end function unpackV
 	
 	
-	function  boris_trick(B_new, v_old, c_i, coeff) result (v_new)
+	function  Boris_trick(B_new, E_new, v_old, c_i, coeff) result (v_new)
 		use problem
 		implicit none
 		integer	:: i
 		double precision, intent(in)				:: coeff
-		double precision, dimension(3), intent(in)	:: B_new, v_old, c_i
+		double precision, dimension(3), intent(in)	:: B_new, E_new, v_old, c_i
 		double precision, dimension(3)			:: v_new		
 		double precision, dimension(3) :: E, t, s, v_min, v_plu, v_star, cross		
 		
-	    	E      = 0.D0
+	    	E      = coeff*E_new*alpha
 	    	t      = coeff*B_new*alpha	    	
 	    	s      = 2.D0*t/(1.D0 + (t(1)*t(1) + t(2)*t(2) + t(3)*t(3)))
 	    	v_min  = v_old + E + 0.5D0*c_i
@@ -317,7 +317,7 @@ module sdc_gmres
 	    			 v_star(1) * s(2) - v_star(2) * s(1)]	    			 
 	    	v_plu  = v_min + cross
 	    	v_new  = v_plu + E + 0.5D0*c_i
-	end function boris_trick
+	end function Boris_trick
 	
 	
 	function sweep(u) result (u_new)
@@ -327,7 +327,7 @@ module sdc_gmres
 		double precision, dimension(dimm), intent(in)		:: u	
 		double precision, dimension(dimm)	:: u_new
 		double precision, dimension(3, colnodes)	:: x, v, xnew, vnew
-		double precision, dimension(3)		:: b, bprime, cross, Bf, Func
+		double precision, dimension(3)		:: b, bprime, cross, Bf, Ef, Func
 		double precision					:: coeff
 
     		x = unpackX(u);	v = unpackV(u)    		
@@ -339,17 +339,18 @@ module sdc_gmres
       		do i = 1, j-1
        			xnew(:,j) = xnew(:,j) + Qd_E(j,i)*vnew(:,i)
        			Func = getF(xnew(:,i),vnew(:,i))
-        			xnew(:,j) = xnew(:,j) + Qd_E2(j,i) * Func
-        			b         = b + Qd_T(j,i) * Func
+        		xnew(:,j) = xnew(:,j) + Qd_E2(j,i) * Func
+        		b         = b + Qd_T(j,i) * Func
       		end do
       		
       		coeff     = Qd_T(j,j)
-      		Bf	    = getB(xnew(:,j))            						
+      		Bf	      = getB(xnew(:,j))
+      		Ef	      = getE(xnew(:,j))      		            						
       		cross     =	[v(2,j) * Bf(3) - v(3,j) * Bf(2), &
 	    			 	 v(3,j) * Bf(1) - v(1,j) * Bf(3), &
 	    			 	 v(1,j) * Bf(2) - v(2,j) * Bf(1)] 
       		bprime    = b - coeff*cross*alpha
-      		vnew(:,j) = boris_trick(Bf, v(:,j), bprime, coeff)
+      		vnew(:,j) = Boris_trick(Bf, Ef, v(:,j), bprime, coeff)
     		end do    
     		u_new = packU(xnew, vnew)      				
 	end function sweep
@@ -363,7 +364,7 @@ module sdc_gmres
 		double precision, dimension(dimm), intent(in)		:: u	
 		double precision, dimension(dimm)	:: u_new
 		double precision, dimension(3, colnodes)	:: x, v, xnew, vnew
-		double precision, dimension(3)		:: b, bprime, cross, Bf, Func
+		double precision, dimension(3)		:: b, bprime, cross, Bf, Ef, Func
 		double precision					:: coeff
 
     		x = unpackX(u);	v = unpackV(u)
@@ -379,13 +380,14 @@ module sdc_gmres
         			b         = b + 0.5D0*(delta_tau(i) + delta_tau(i+1)) * Func
         		end do
         		
-        		coeff     = 0.5D0*delta_tau(j)
+        	coeff     = 0.5D0*delta_tau(j)
       		Bf	    = getB(x_0(:,j))            						
+      		Ef	    = getE(x_0(:,j))  
       		cross     =	[v(2,j) * Bf(3) - v(3,j) * Bf(2), &
 	    			 	 v(3,j) * Bf(1) - v(1,j) * Bf(3), &
 	    			 	 v(1,j) * Bf(2) - v(2,j) * Bf(1)]	    			 		    			 		
       		bprime    = b - coeff*cross*alpha
-      		vnew(:,j) = boris_trick(Bf, v(:,j), bprime, coeff)
+      		vnew(:,j) = boris_trick(Bf, Ef, v(:,j), bprime, coeff)
     		end do    		
     		u_new = packU(xnew, vnew)      				
 	end function sweep_lin
@@ -508,7 +510,7 @@ module sdc_gmres
     	end subroutine arnoldi
     	
     	
-    	function apply_qn(h, c, s, n) result (h_new)
+    function apply_qn(h, c, s, n) result (h_new)
 		implicit none
     		integer :: i
 		integer, intent(in) :: n

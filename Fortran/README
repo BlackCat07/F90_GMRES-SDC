@@ -5,5 +5,5 @@ PTCL 	defines type of particle, 1 - passing, 2 - trapped
 NODES 	defines the number of collocation nodes 3 or 5 ONLY!
 
 Output:
-outfile1 - runtime and energy error
-outfile2 - trajectory in cylindrical coordinates R, Phi, Z
+fl1 - runtime and energy error
+fl2 - trajectory in cylindrical coordinates R, Phi, Z
